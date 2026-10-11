@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { writeFile, readFile } from 'node:fs/promises';
+import { writeFile, readFile, copyFile, mkdir } from 'node:fs/promises';
 import { prepareQuestion } from '../src/context';
 import { JobRunner } from '../src/runner';
 
@@ -69,7 +69,7 @@ export async function run(): Promise<void> {
   );
   const config = vscode.workspace.getConfiguration('webAiBridge');
   for (const [key, value] of Object.entries({
-    url: process.env.BRIDGE_TEST_URL!,
+    url: `${process.env.BRIDGE_TEST_URL!}?delay=12000`,
     connectionMode: 'dedicated',
     profileDirectory: join(directory, 'ui-profile'),
     logDirectory: join(directory, 'ui-logs'),
@@ -78,9 +78,55 @@ export async function run(): Promise<void> {
     await config.update(key, value, vscode.ConfigurationTarget.Workspace);
   }
   await vscode.commands.executeCommand('web-ai-bridge.open');
+  const imagePath = join(directory, 'vscode-example.png');
+  await copyFile(
+    join(vscode.env.appRoot, 'resources/win32/code_150x150.png'),
+    imagePath,
+  );
+  await vscode.commands.executeCommand(
+    'web-ai-bridge.attachFiles',
+    vscode.Uri.file(imagePath),
+  );
+  const contextDocument = await vscode.workspace.openTextDocument(
+    vscode.Uri.file(join(directory, 'active.txt')),
+  );
+  const contextEditor = await vscode.window.showTextDocument(contextDocument);
+  contextEditor.selection = new vscode.Selection(0, 0, 0, 4);
+  const combined = await prepareQuestion(
+    '両方を指定',
+    'both',
+    contextEditor,
+    [],
+  );
+  assert.ok(combined.context);
+  assert.equal(combined.attachments.length, 1);
+  contextEditor.selection = new vscode.Selection(0, 0, 0, 0);
+  await assert.rejects(
+    prepareQuestion('選択なし', 'selection', contextEditor, []),
+    /範囲を選択/,
+  );
+  contextEditor.selection = new vscode.Selection(0, 0, 0, 4);
+  const promptDirectory = join(directory, 'sample-prompts');
+  await mkdir(promptDirectory);
+  await writeFile(
+    join(promptDirectory, 'custom.md'),
+    '# 指定フォルダのサンプル\n日本語で簡潔に回答してください。',
+  );
+  await writeFile(join(promptDirectory, 'ignored.txt'), '一覧に含めない');
   await writeFile(join(directory, 'ui-ready'), 'ready');
-  const deadline = Date.now() + 60000;
+  const deadline = Date.now() + 120000;
   while (true) {
+    try {
+      await readFile(join(directory, 'use-custom-prompts'), 'utf8');
+      if (config.get('promptDirectory') !== promptDirectory)
+        await config.update(
+          'promptDirectory',
+          promptDirectory,
+          vscode.ConfigurationTarget.Workspace,
+        );
+    } catch {
+      /* UI test has not requested the custom directory yet. */
+    }
     try {
       await readFile(join(directory, 'ui-complete'), 'utf8');
       break;

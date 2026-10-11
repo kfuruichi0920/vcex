@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { join, isAbsolute, resolve } from 'node:path';
+import { join, isAbsolute, resolve, basename } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { prepareQuestion } from './context';
 import {
@@ -9,8 +9,10 @@ import {
   type ContextMode,
   type PreparedQuestion,
   type RunOptions,
+  type State,
 } from './domain';
 import { JobRunner } from './runner';
+import { attachmentView, listPrompts, loadPrompt } from './assets';
 
 function options(context: vscode.ExtensionContext): RunOptions {
   const config = vscode.workspace.getConfiguration('webAiBridge');
@@ -57,24 +59,72 @@ function options(context: vscode.ExtensionContext): RunOptions {
     clipboardScript: join(context.extensionPath, 'dist/clipboard.ps1'),
   };
 }
+interface QueuedQuestion {
+  id: string;
+  input: PreparedQuestion;
+  options: RunOptions;
+  state: State | 'QUEUED';
+  logPath?: string;
+}
 class Sidebar implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
   private files: vscode.Uri[] = [];
   private lastEditor = vscode.window.activeTextEditor;
-  private prepared:
-    { id: string; input: PreparedQuestion; options: RunOptions } | undefined;
   private controller: AbortController | undefined;
   private busy = false;
+  private running = false;
+  private queue: QueuedQuestion[] = [];
+  private jobs: QueuedQuestion[] = [];
+  private activeId: string | undefined;
+  private readonly logFiles = new Set<string>();
   private readonly runner = new JobRunner();
   constructor(private readonly context: vscode.ExtensionContext) {
+    this.files = context.workspaceState
+      .get<string[]>('attachments', [])
+      .filter((path) => typeof path === 'string' && isAbsolute(path))
+      .map((path) => vscode.Uri.file(path));
     context.subscriptions.push(
       vscode.window.onDidChangeActiveTextEditor((editor) => {
-        if (editor) this.lastEditor = editor;
+        if (
+          editor &&
+          !this.logFiles.has(editor.document.uri.fsPath.toLowerCase())
+        ) {
+          this.lastEditor = editor;
+          this.publishContext();
+        }
+      }),
+      vscode.window.onDidChangeTextEditorSelection((event) => {
+        if (event.textEditor === this.lastEditor) this.publishContext();
+      }),
+      vscode.workspace.onDidChangeConfiguration((event) => {
+        if (event.affectsConfiguration('webAiBridge')) {
+          void this.publishPrompts().catch((error) =>
+            this.post({ type: 'error', text: errorText(error) }),
+          );
+        }
       }),
     );
   }
   cancel(): void {
     this.controller?.abort();
+  }
+  dispose(): void {
+    this.queue = [];
+    this.cancel();
+  }
+  async attachFiles(files: readonly vscode.Uri[]): Promise<void> {
+    this.files = [
+      ...new Map(
+        [...this.files, ...files]
+          .filter((uri) => uri.scheme === 'file')
+          .map((uri) => [uri.fsPath.toLowerCase(), uri]),
+      ).values(),
+    ];
+    await this.context.workspaceState.update(
+      'attachments',
+      this.files.map((file) => file.fsPath),
+    );
+    await this.publishFiles();
   }
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
@@ -88,15 +138,18 @@ class Sidebar implements vscode.WebviewViewProvider {
       view.webview.asWebviewUri(
         vscode.Uri.joinPath(this.context.extensionUri, 'media', file),
       );
-    view.webview.html = `<!doctype html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src ${view.webview.cspSource}; style-src ${view.webview.cspSource};"><link rel="stylesheet" href="${uri('sidebar.css')}"></head><body>
-      <h2>Web AI Bridge</h2><p class="note">Phase 0 · 仮 React チャット</p>
-      <label for="question">質問</label><textarea id="question" rows="8" placeholder="日本語・複数行で入力できます"></textarea>
-      <label for="context">エディタのコンテキスト</label><select id="context"><option value="auto">自動（選択範囲／ファイル添付）</option><option value="selection">選択範囲</option><option value="file">ファイル全文を添付</option><option value="none">なし</option></select>
-      <p class="note">最後に開いたテキストエディタを使用します。</p><button id="files">ファイルを追加</button><ul id="attachments"></ul>
-      <p class="note">PNG / Office / PDF、複数ファイル対応。D&amp;D はファイル選択へ案内します。/コマンド・@補完は後続フェーズです。</p>
-      <button id="preview">送信前に確認</button><section id="confirmation" hidden><h3>送信内容</h3><pre id="details"></pre><p id="warning"></p><button id="send">この内容で送信</button></section>
-      <button id="cancel" hidden>取り消す</button><p id="status" role="status" aria-live="polite">READY</p><button id="settings">設定を開く</button>
-      <p class="note">CDP は既存 Edge を非表示にできません。専用 Edge は別ログインが必要になる場合があります。添付時のクリップボード完全復元は保証されません。</p>
+    view.webview.html = `<!doctype html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; script-src ${view.webview.cspSource}; style-src ${view.webview.cspSource};"><link rel="stylesheet" href="${uri('sidebar.css')}"></head><body>
+      <header class="toolbar"><strong>WEB AI BRIDGE</strong><span class="badge">Phase 0</span><button id="settings" class="secondary compact" title="Web AI Bridge の設定を開く">設定</button></header>
+      <main>
+        <p class="quick-start">質問とコンテキストを選んで送信</p>
+        <section class="panel"><div class="section-heading"><label for="system-prompt">システムプロンプト</label></div><select id="system-prompt"><option value="">なし</option></select><details class="prompt-content"><summary>詳細</summary><div class="prompt-tools"><button id="prompt-folder" class="secondary compact">フォルダ</button><button id="prompt-refresh" class="secondary compact">更新</button></div><p id="prompt-directory" class="note hint"></p><pre id="prompt-content">なし</pre><p class="note hint">Markdown 本文を質問の先頭へ付加します。</p></details></section>
+        <section class="panel"><div class="section-heading"><label for="question">質問</label><span id="question-count" class="note">0 文字</span></div><textarea id="question" rows="5" placeholder="質問を入力…（複数行対応）"></textarea></section>
+        <section class="panel"><div class="section-heading"><h3>コンテキスト</h3></div><div class="context-options"><label><input id="context-file" type="checkbox">今開いているファイル <span class="note">全文</span></label><label><input id="context-selection" type="checkbox">選択箇所</label></div><p id="context-target" class="note hint">未チェックなら質問と添付のみ送信</p></section>
+        <section class="panel"><div class="section-heading"><h3>添付 <span id="attachment-count" class="badge">0</span></h3><button id="files" class="secondary compact" title="ファイルを追加（Ctrl+Alt+A）" aria-keyshortcuts="Control+Alt+A">＋ ファイルを追加</button></div><ul id="attachments"></ul><p id="attachment-empty" class="note hint">添付なし · PNG / Office / PDF · 複数選択可</p></section>
+        <section class="panel"><div class="section-heading"><h3>送信ジョブ <span id="queue-count" class="badge">0</span></h3><span class="note">順次実行</span></div><ul id="jobs"></ul><p id="jobs-empty" class="note hint">回答待ち中も次の質問を送信予約できます。</p></section>
+        <details id="help" class="panel help"><summary>使い方・接続の準備</summary><ol><li>検証用チャットを開発ターミナルで <code>npm run mock:chat</code> により起動します。現状は仮 React チャット専用です。</li><li>「設定」で接続方式を <code>dedicated</code> にすると専用 Edge を起動できます。既存 Edge を使う <code>cdp</code> はリモートデバッグ接続の準備が必要です。</li><li>質問を入力し、必要なコンテキストにチェックします。「ファイルを追加」で選んだ添付は削除するまで維持されます。</li><li>「送信」で実行します。回答待ち中は次の質問を「送信予約」できます。送信内容は質問と回答の Markdown ファイルに記録します。</li><li>完了すると回答の Markdown ログが開きます。実行中は「取り消す」で中断できます。送信済みの質問は取り消せません。</li></ol><p class="note">キー操作（パネル内）: Ctrl+Enter で送信・予約、Ctrl+Alt+A でファイル追加、Ctrl+Shift+Enter で実行取消。Enter は改行、Tab で移動、Space でチェック切替。日本語変換中は送信しません。</p><p class="note">添付は表示ありの Edge を使用してください。貼り付け中は他アプリでコピー操作を避けてください。クリップボードの完全復元は保証されません。画像の直接貼り付け・D&amp;D・/ コマンド・@ 補完は後続対応です。</p></details>
+      </main>
+      <footer class="action-bar"><div class="actions"><button id="send" disabled title="送信・送信予約（Ctrl+Enter）" aria-keyshortcuts="Control+Enter">送信</button><button id="cancel" class="secondary" hidden title="実行中の質問を取り消す（Ctrl+Shift+Enter）" aria-keyshortcuts="Control+Shift+Enter">取り消す</button></div><p class="note hint">Ctrl+Enter で送信 · Enter で改行</p><p id="send-hint" class="note hint">質問を入力して送信してください。</p><p id="warning" role="status"></p><p id="status" role="status" aria-live="polite">READY</p></footer>
       <script src="${uri('sidebar.js')}"></script></body></html>`;
     view.webview.onDidReceiveMessage(
       (message: unknown) => {
@@ -110,7 +163,6 @@ class Sidebar implements vscode.WebviewViewProvider {
     view.onDidDispose(
       () => {
         this.view = undefined;
-        this.prepared = undefined;
       },
       undefined,
       this.context.subscriptions,
@@ -118,6 +170,112 @@ class Sidebar implements vscode.WebviewViewProvider {
   }
   private post(message: object): void {
     void this.view?.webview.postMessage(message);
+  }
+  private publishContext(): void {
+    const editor = this.lastEditor;
+    this.post({
+      type: 'context-target',
+      text: editor
+        ? `${basename(editor.document.fileName)} · 選択 ${editor.selections.filter((selection) => !selection.isEmpty).length} 箇所`
+        : '対象のテキストエディタなし',
+    });
+  }
+  private promptDirectory(): string {
+    const directory = vscode.workspace
+      .getConfiguration('webAiBridge')
+      .get<string>('promptDirectory', '');
+    if (!directory) return join(this.context.extensionPath, 'media/prompts');
+    if (!isAbsolute(directory) && !vscode.workspace.workspaceFolders?.length)
+      throw new BridgeError(
+        'PROMPT_DIRECTORY',
+        'フォルダは絶対パスで指定するかワークスペースを開いてください。',
+      );
+    return resolve(
+      vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '',
+      directory,
+    );
+  }
+  private async publishPrompts(): Promise<void> {
+    const directory = this.promptDirectory();
+    this.post({
+      type: 'prompts',
+      directory,
+      names: await listPrompts(directory),
+    });
+  }
+  private async publishFiles(): Promise<void> {
+    this.post({
+      type: 'files',
+      files: await Promise.all(
+        this.files.map((file) =>
+          attachmentView(file.fsPath, vscode.workspace.asRelativePath(file)),
+        ),
+      ),
+    });
+  }
+  private publishJobs(): void {
+    this.post({
+      type: 'jobs',
+      pending: this.queue.length,
+      jobs: this.jobs.map((job) => ({
+        id: job.id,
+        question: job.input.question,
+        state: job.state,
+        logPath: job.logPath,
+      })),
+    });
+    this.post({ type: 'busy', busy: this.running });
+  }
+  private async drain(): Promise<void> {
+    if (this.running) return;
+    this.running = true;
+    try {
+      while (this.queue.length) {
+        const job = this.queue.shift()!;
+        this.activeId = job.id;
+        this.controller = new AbortController();
+        this.publishJobs();
+        try {
+          const result = await this.runner.run(
+            job.input,
+            job.options,
+            this.controller.signal,
+            (state) => {
+              job.state = state;
+              this.publishJobs();
+              this.post({ type: 'status', text: state });
+            },
+          );
+          job.state = result.state;
+          job.logPath = result.logPath;
+          this.post({
+            type: 'status',
+            text: `${result.state}${result.error ? `\n${result.error}` : ''}${result.logPath ? `\nログ: ${result.logPath}` : ''}${result.warnings.length ? `\n${result.warnings.join('\n')}` : ''}`,
+          });
+          if (result.logPath) this.logFiles.add(result.logPath.toLowerCase());
+          if (
+            result.logPath &&
+            vscode.workspace
+              .getConfiguration('webAiBridge')
+              .get('openLog', true)
+          )
+            await vscode.window.showTextDocument(
+              vscode.Uri.file(result.logPath),
+              { preview: false, preserveFocus: true },
+            );
+        } catch (error) {
+          job.state = 'FAILED';
+          this.post({ type: 'error', text: errorText(error) });
+        } finally {
+          this.controller = undefined;
+          this.activeId = undefined;
+          this.publishJobs();
+        }
+      }
+    } finally {
+      this.running = false;
+      this.publishJobs();
+    }
   }
   private async receive(value: unknown): Promise<void> {
     if (!value || typeof value !== 'object' || !('type' in value)) return;
@@ -127,8 +285,56 @@ class Sidebar implements vscode.WebviewViewProvider {
       mode?: ContextMode;
       index?: number;
       id?: string;
+      promptName?: string;
     };
+    if (message.type === 'ready') {
+      await this.publishPrompts();
+      await this.publishFiles();
+      this.publishJobs();
+      this.publishContext();
+      return;
+    }
+    if (message.type === 'prompt-folder') {
+      const selected = await vscode.window.showOpenDialog({
+        canSelectFolders: true,
+        canSelectFiles: false,
+        canSelectMany: false,
+        title: 'システムプロンプトの Markdown フォルダ',
+      });
+      if (selected?.[0])
+        await vscode.workspace
+          .getConfiguration('webAiBridge')
+          .update(
+            'promptDirectory',
+            selected[0].fsPath,
+            vscode.workspace.workspaceFolders?.length
+              ? vscode.ConfigurationTarget.Workspace
+              : vscode.ConfigurationTarget.Global,
+          );
+      return;
+    }
+    if (message.type === 'prompt-refresh') {
+      await this.publishPrompts();
+      return;
+    }
+    if (message.type === 'prompt-select') {
+      const name =
+        typeof message.promptName === 'string' ? message.promptName : '';
+      this.post({
+        type: 'prompt-content',
+        name,
+        text: await loadPrompt(this.promptDirectory(), name),
+      });
+      return;
+    }
     if (message.type === 'cancel') {
+      if (message.id && message.id !== this.activeId) {
+        const index = this.queue.findIndex((job) => job.id === message.id);
+        const job = index >= 0 ? this.queue.splice(index, 1)[0] : undefined;
+        if (job) job.state = 'CANCELLED';
+        this.publishJobs();
+        return;
+      }
       this.cancel();
       return;
     }
@@ -149,95 +355,68 @@ class Sidebar implements vscode.WebviewViewProvider {
         canSelectMany: true,
         title: '添付ファイルを選択',
       });
-      if (files)
-        this.files = [
-          ...new Map(
-            [...this.files, ...files]
-              .filter((uri) => uri.scheme === 'file')
-              .map((uri) => [uri.fsPath.toLowerCase(), uri]),
-          ).values(),
-        ];
-      this.prepared = undefined;
-      this.post({
-        type: 'files',
-        files: this.files.map((file) => vscode.workspace.asRelativePath(file)),
-      });
+      if (files) await this.attachFiles(files);
     } else if (
       message.type === 'remove' &&
       Number.isInteger(message.index) &&
       message.index! >= 0
     ) {
       this.files.splice(message.index!, 1);
-      this.prepared = undefined;
-      this.post({
-        type: 'files',
-        files: this.files.map((file) => vscode.workspace.asRelativePath(file)),
-      });
-    } else if (message.type === 'invalidate') {
-      this.prepared = undefined;
-    } else if (message.type === 'preview') {
+      await this.context.workspaceState.update(
+        'attachments',
+        this.files.map((file) => file.fsPath),
+      );
+      await this.publishFiles();
+    } else if (message.type === 'send') {
       if (
         typeof message.question !== 'string' ||
-        !['auto', 'selection', 'file', 'none'].includes(message.mode || '')
+        !['selection', 'file', 'both', 'none'].includes(message.mode || '')
       )
         return;
-      this.prepared = undefined;
       this.busy = true;
+      this.post({ type: 'preparing', busy: true });
       try {
+        const settings = options(this.context);
         const input = await prepareQuestion(
           message.question,
           message.mode!,
           this.lastEditor,
-          this.files,
+          [...this.files],
         );
-        const settings = options(this.context);
-        this.prepared = { id: randomUUID(), input, options: settings };
-        this.post({
-          type: 'preview',
-          id: this.prepared.id,
-          text: `送信先: ${settings.url}\n方式: ${settings.connection.mode}${settings.connection.mode === 'dedicated' ? (settings.connection.headless ? '（非表示）' : '（表示）') : '（既存 Edge・非表示化不可）'}\nログ保存先: ${settings.logDirectory}\n\n${input.prompt}\n\n添付:\n${input.attachments.map((file) => `${file.name} (${file.size} bytes)`).join('\n') || 'なし'}`,
-          warning:
-            input.prompt.length > 38000
-              ? `警告: 送信テキストが ${input.prompt.length} 文字（38,000文字超）です。送信は可能です。`
-              : '',
-        });
-      } finally {
-        this.busy = false;
-      }
-    } else if (message.type === 'send') {
-      const prepared = this.prepared;
-      if (!prepared || prepared.id !== message.id)
-        throw new BridgeError(
-          'PREVIEW_REQUIRED',
-          '送信内容をもう一度確認してください。',
+        input.systemPromptName =
+          typeof message.promptName === 'string' ? message.promptName : '';
+        input.systemPrompt = await loadPrompt(
+          this.promptDirectory(),
+          input.systemPromptName,
         );
-      this.prepared = undefined;
-      this.busy = true;
-      this.controller = new AbortController();
-      this.post({ type: 'busy', busy: true });
-      try {
-        const result = await this.runner.run(
-          prepared.input,
-          prepared.options,
-          this.controller.signal,
-          (state) => this.post({ type: 'status', text: state }),
-        );
-        this.post({
-          type: 'status',
-          text: `${result.state}${result.error ? `\n${result.error}` : ''}${result.logPath ? `\nログ: ${result.logPath}` : ''}${result.warnings.length ? `\n${result.warnings.join('\n')}` : ''}`,
-        });
-        if (
-          result.logPath &&
-          vscode.workspace.getConfiguration('webAiBridge').get('openLog', true)
-        )
-          await vscode.window.showTextDocument(
-            vscode.Uri.file(result.logPath),
-            { preview: false },
+        if (input.systemPrompt)
+          input.prompt = `## システムプロンプト\n${input.systemPrompt}\n\n## ユーザー質問\n${input.prompt}`;
+        const job: QueuedQuestion = {
+          id: randomUUID(),
+          input,
+          options: settings,
+          state: 'QUEUED',
+        };
+        this.jobs = this.jobs
+          .filter(
+            (entry) => entry.state === 'QUEUED' || entry.id === this.activeId,
+          )
+          .concat(
+            this.jobs
+              .filter(
+                (entry) =>
+                  entry.state !== 'QUEUED' && entry.id !== this.activeId,
+              )
+              .slice(-19),
+            job,
           );
+        this.queue.push(job);
+        this.publishJobs();
+        this.post({ type: 'accepted', question: message.question });
+        void this.drain();
       } finally {
         this.busy = false;
-        this.controller = undefined;
-        this.post({ type: 'busy', busy: false });
+        this.post({ type: 'preparing', busy: false });
       }
     }
   }
@@ -252,6 +431,16 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('web-ai-bridge.cancel', () =>
       sidebar.cancel(),
     ),
-    { dispose: () => sidebar.cancel() },
+    vscode.commands.registerCommand(
+      'web-ai-bridge.attachFiles',
+      async (
+        uri: vscode.Uri | undefined,
+        selected: vscode.Uri[] | undefined,
+      ) => {
+        await sidebar.attachFiles(selected || (uri ? [uri] : []));
+        await vscode.commands.executeCommand('web-ai-bridge.open');
+      },
+    ),
+    { dispose: () => sidebar.dispose() },
   );
 }

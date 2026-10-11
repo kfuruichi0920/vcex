@@ -30,6 +30,10 @@
   "contributes": {
     "commands": [
       {
+        "command": "web-ai-bridge.attachFiles",
+        "title": "Web AI Bridge: ファイルを質問に添付"
+      },
+      {
         "command": "web-ai-bridge.open",
         "title": "Web AI Bridge: 質問パネルを開く"
       },
@@ -38,6 +42,15 @@
         "title": "Web AI Bridge: 実行を取り消す"
       }
     ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "web-ai-bridge.attachFiles",
+          "when": "resourceScheme == file && !explorerResourceIsFolder",
+          "group": "navigation@99"
+        }
+      ]
+    },
     "viewsContainers": {
       "activitybar": [
         {
@@ -59,6 +72,11 @@
     "configuration": {
       "title": "Web AI Bridge",
       "properties": {
+        "webAiBridge.promptDirectory": {
+          "type": "string",
+          "default": "",
+          "description": "システムプロンプト用 Markdown フォルダ。直下の .md を一覧表示。相対パスはワークスペース基準、空欄は同梱サンプル。本文は質問の先頭に付加されます。"
+        },
         "webAiBridge.url": {
           "type": "string",
           "default": "http://127.0.0.1:4173",

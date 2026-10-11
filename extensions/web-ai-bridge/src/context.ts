@@ -32,6 +32,11 @@ export async function prepareQuestion(
 ): Promise<PreparedQuestion> {
   if (!question.trim())
     throw new BridgeError('INVALID_QUESTION', '質問を入力してください。');
+  if (mode !== 'none' && mode !== 'auto' && !editor)
+    throw new BridgeError(
+      'CONTEXT_REQUIRED',
+      '対象のテキストファイルを開くか、コンテキストのチェックを外してください。',
+    );
   let context = '';
   const paths = new Map(
     files.map((file) => [file.fsPath.toLowerCase(), file.fsPath]),
@@ -40,14 +45,28 @@ export async function prepareQuestion(
     const selections = editor.selections
       .filter((selection) => !selection.isEmpty)
       .sort((a, b) => a.start.compareTo(b.start));
-    if (mode === 'selection' || (mode === 'auto' && selections.length)) {
+    if ((mode === 'selection' || mode === 'both') && !selections.length)
+      throw new BridgeError(
+        'SELECTION_REQUIRED',
+        'エディタで範囲を選択するか、「選択箇所」のチェックを外してください。',
+      );
+    if (
+      mode === 'selection' ||
+      mode === 'both' ||
+      (mode === 'auto' && selections.length)
+    ) {
       context = selections
         .map(
           (range) =>
             `--- ${basename(editor.document.fileName)}:${range.start.line + 1}-${range.end.line + 1} ---\n${editor.document.getText(range)}`,
         )
         .join('\n\n');
-    } else {
+    }
+    if (
+      mode === 'file' ||
+      mode === 'both' ||
+      (mode === 'auto' && !selections.length)
+    ) {
       if (editor.document.isUntitled || editor.document.uri.scheme !== 'file')
         throw new BridgeError(
           'UNSAVED_FILE',
@@ -75,6 +94,9 @@ export async function prepareQuestion(
   return {
     question,
     context,
+    contextMode: mode,
+    contextFile:
+      mode !== 'none' && editor ? basename(editor.document.fileName) : '',
     prompt: context
       ? `${question}\n\n## エディタの選択範囲\n${context}`
       : question,

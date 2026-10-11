@@ -32,14 +32,18 @@ function literal(value: string): string {
 export function renderLog(job: Execution): string {
   return (
     [
-      '# Web AI Bridge',
+      '# ユーザーの質問と回答',
       '## 実行情報',
-      `- 実行日時: ${job.started.toString()}\n- 接続先: ${job.destination}\n- 実行状態: ${job.state}`,
+      `- 実行日時: ${job.started.toString()}\n- 接続先: ${job.destination}\n- 接続方式: ${job.connectionMode || '未指定'}\n- 実行状態: ${job.state}`,
       '## ユーザー質問',
       literal(job.input.question),
-      '## 定型プロンプト',
-      'Phase 0: /コマンド展開は未実装。',
+      '## システムプロンプト（質問の先頭へ付加）',
+      literal(job.input.systemPromptName || 'なし'),
+      literal(job.input.systemPrompt || 'なし'),
       '## コンテキスト',
+      literal(
+        `指定: ${job.input.contextMode || 'none'}\n対象ファイル: ${job.input.contextFile || 'なし'}`,
+      ),
       literal(job.input.context || 'なし'),
       '## 送信テキスト',
       literal(job.input.prompt),

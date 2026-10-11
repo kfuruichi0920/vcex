@@ -36,6 +36,7 @@ export class JobRunner {
       started: new Date(),
       state: 'VALIDATING',
       destination: '',
+      connectionMode: options.connection.mode,
       input: structuredClone(input),
       answer: '',
       error: '',
@@ -67,7 +68,7 @@ export class JobRunner {
         )
           throw new BridgeError(
             'FILE_CHANGED',
-            '確認後に添付ファイルが変更・削除されました。もう一度プレビューしてください。',
+            '送信予約後に添付ファイルが変更・削除されました。添付を確認してもう一度送信してください。',
           );
       }
       job.logPath = await createLog(options.logDirectory, job);

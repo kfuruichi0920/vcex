@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildTestModules } from './bridge-test-build.mjs';
@@ -12,7 +12,56 @@ const {
   updateLog,
   validateUrl,
   publicDestination,
+  listPrompts,
+  loadPrompt,
+  attachmentView,
 } = require(await buildTestModules());
+
+test('プロンプトは指定フォルダ直下の Markdown に限定し、一覧外の読み込みを拒否する', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'bridge-prompts-'));
+  try {
+    await writeFile(
+      join(directory, 'sample.MD'),
+      '\uFEFF# サンプル\n日本語で回答',
+    );
+    await writeFile(join(directory, 'ignore.txt'), 'ignore');
+    await mkdir(join(directory, 'nested.md'));
+    assert.deepEqual(await listPrompts(directory), ['sample.MD']);
+    assert.equal(
+      await loadPrompt(directory, 'sample.MD'),
+      '# サンプル\n日本語で回答',
+    );
+    assert.equal(await loadPrompt(directory, ''), '');
+    await assert.rejects(loadPrompt(directory, '../ignore.txt'));
+    await assert.rejects(loadPrompt(directory, 'missing.md'));
+    await writeFile(join(directory, 'huge.md'), 'a'.repeat(1024 * 1024 + 1));
+    await assert.rejects(loadPrompt(directory, 'huge.md'), /1 MB/);
+    await writeFile(
+      join(directory, 'small.png'),
+      Buffer.from([137, 80, 78, 71]),
+    );
+    assert.match(
+      (await attachmentView(join(directory, 'small.png'), 'small.png'))
+        .thumbnail,
+      /^data:image\/png;base64,/,
+    );
+    assert.equal(
+      (await attachmentView(join(directory, 'ignore.txt'), 'ignore.txt'))
+        .thumbnail,
+      undefined,
+    );
+    await writeFile(
+      join(directory, 'large.png'),
+      Buffer.alloc(8 * 1024 * 1024 + 1),
+    );
+    assert.match(
+      (await attachmentView(join(directory, 'large.png'), 'large.png')).note,
+      /8 MB/,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test('ログはローカル日時・安全なファイル名・連番を使用し、添付内容を含まない', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'bridge-log-'));

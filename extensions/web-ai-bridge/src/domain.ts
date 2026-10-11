@@ -10,7 +10,7 @@ export type State =
   | 'COMPLETED'
   | 'FAILED'
   | 'CANCELLED';
-export type ContextMode = 'auto' | 'selection' | 'file' | 'none';
+export type ContextMode = 'auto' | 'selection' | 'file' | 'both' | 'none';
 export interface Attachment {
   path: string;
   name: string;
@@ -21,8 +21,12 @@ export interface Attachment {
 }
 export interface PreparedQuestion {
   question: string;
+  systemPrompt?: string;
+  systemPromptName?: string;
   prompt: string;
   context: string;
+  contextMode?: ContextMode;
+  contextFile?: string;
   attachments: Attachment[];
 }
 export interface ConnectionOptions {
@@ -42,6 +46,7 @@ export interface Execution {
   started: Date;
   state: State;
   destination: string;
+  connectionMode?: string;
   input: PreparedQuestion;
   answer: string;
   error: string;

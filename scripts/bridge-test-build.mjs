@@ -6,7 +6,7 @@ export async function buildTestModules() {
   await build({
     stdin: {
       contents:
-        "export * from './extensions/web-ai-bridge/src/runner'; export * from './extensions/web-ai-bridge/src/log'; export * from './extensions/web-ai-bridge/src/domain'; export * from './extensions/web-ai-bridge/src/adapter'; export * from './extensions/web-ai-bridge/src/clipboard';",
+        "export * from './extensions/web-ai-bridge/src/runner'; export * from './extensions/web-ai-bridge/src/log'; export * from './extensions/web-ai-bridge/src/domain'; export * from './extensions/web-ai-bridge/src/adapter'; export * from './extensions/web-ai-bridge/src/clipboard'; export * from './extensions/web-ai-bridge/src/assets';",
       resolveDir: root,
       loader: 'ts',
     },
