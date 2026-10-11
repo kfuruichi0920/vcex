@@ -1,0 +1,111 @@
+{
+  "name": "web-ai-bridge",
+  "displayName": "Web AI Bridge (Phase 0)",
+  "description": "Edge の Web チャットへ質問・添付し、回答を Markdown に保存する方式検証版。",
+  "version": "0.0.1",
+  "private": true,
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    },
+    "virtualWorkspaces": false
+  },
+  "publisher": "local-dev",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "scripts": {
+    "build": "node ../../scripts/build-web-ai-bridge.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "vscode:prepublish": "npm run typecheck && node ../../scripts/build-web-ai-bridge.mjs --production",
+    "package": "vsce package --no-dependencies --allow-missing-repository --skip-license"
+  },
+  "dependencies": {
+    "playwright-core": "1.64.0"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "web-ai-bridge.open",
+        "title": "Web AI Bridge: 質問パネルを開く"
+      },
+      {
+        "command": "web-ai-bridge.cancel",
+        "title": "Web AI Bridge: 実行を取り消す"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "web-ai-bridge",
+          "title": "Web AI Bridge",
+          "icon": "media/bridge.svg"
+        }
+      ]
+    },
+    "views": {
+      "web-ai-bridge": [
+        {
+          "id": "web-ai-bridge.sidebar",
+          "name": "Web AI Bridge",
+          "type": "webview"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Web AI Bridge",
+      "properties": {
+        "webAiBridge.url": {
+          "type": "string",
+          "default": "http://127.0.0.1:4173",
+          "description": "仮 React チャットの URL。Phase 0 は mock-v1 アダプターのみ対応します。"
+        },
+        "webAiBridge.connectionMode": {
+          "type": "string",
+          "enum": [
+            "cdp",
+            "dedicated"
+          ],
+          "default": "cdp",
+          "description": "既存 Edge への CDP 接続、または別プロファイルの専用 Edge。"
+        },
+        "webAiBridge.cdpEndpoint": {
+          "type": "string",
+          "default": "http://127.0.0.1:9222",
+          "description": "許可されたローカル Edge の CDP 接続先。他タブは操作しません。"
+        },
+        "webAiBridge.headless": {
+          "type": "boolean",
+          "default": false,
+          "description": "専用 Edge のみ有効。既存 Edge の CDP 接続を非表示にはできません。"
+        },
+        "webAiBridge.profileDirectory": {
+          "type": "string",
+          "default": "",
+          "description": "専用 Edge のプロファイル保存先。空欄は globalStorage/edge-profile。通常利用のプロファイルは指定しないでください。"
+        },
+        "webAiBridge.logDirectory": {
+          "type": "string",
+          "default": "",
+          "description": "Markdown ログ保存先。空欄はワークスペースの web-ai-bridge-logs。"
+        },
+        "webAiBridge.timeoutSeconds": {
+          "type": "number",
+          "default": 120,
+          "minimum": 5,
+          "maximum": 3600,
+          "description": "回答完了の待機秒数（Phase 0 の仮値）。"
+        },
+        "webAiBridge.openLog": {
+          "type": "boolean",
+          "default": true,
+          "description": "実行終了後にログを開く。"
+        }
+      }
+    }
+  }
+}

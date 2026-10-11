@@ -9,7 +9,8 @@
   "packageManager": "npm@11.6.1",
   "workspaces": [
     "packages/*",
-    "extensions/*"
+    "extensions/*",
+    "tools/*"
   ],
   "scripts": {
     "new:extension": "node scripts/new-extension.mjs",
@@ -19,12 +20,16 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "node --test scripts/*.test.mjs",
-    "check": "npm run typecheck && npm run lint && npm run format:check && npm test && npm run build"
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm test && npm run build",
+    "mock:chat": "npm run build --workspace=@vcex/mock-chat && npm start --workspace=@vcex/mock-chat",
+    "test:bridge": "node scripts/test-bridge.mjs",
+    "test:portable": "node scripts/test-portable.mjs"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",
     "@types/node": "22.20.5",
     "@types/vscode": "1.100.0",
+    "@vscode/test-electron": "3.1.0",
     "@vscode/vsce": "4.0.0",
     "esbuild": "0.28.2",
     "eslint": "9.39.5",

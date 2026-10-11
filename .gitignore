@@ -4,6 +4,8 @@ coverage/
 *.vsix
 .vscode-test/
 *.log
+web-ai-bridge-logs/
+.test-artifacts/
 .env
 .env.*
 !.env.example

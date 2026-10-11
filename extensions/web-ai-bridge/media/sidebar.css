@@ -1,0 +1,55 @@
+body {
+  color: var(--vscode-foreground);
+  padding: 12px;
+  font-family: var(--vscode-font-family);
+}
+label {
+  display: block;
+  margin: 16px 0 6px;
+  font-weight: 600;
+}
+textarea,
+select {
+  box-sizing: border-box;
+  width: 100%;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border);
+  padding: 8px;
+}
+button {
+  margin: 8px 4px 8px 0;
+  padding: 6px 10px;
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border: 0;
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+}
+.note {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+  line-height: 1.6;
+}
+pre,
+#status {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+pre {
+  background: var(--vscode-textCodeBlock-background);
+  padding: 10px;
+}
+#warning {
+  color: var(--vscode-editorWarning-foreground);
+}
+li {
+  overflow-wrap: anywhere;
+}

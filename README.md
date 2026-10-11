@@ -9,6 +9,7 @@ packages/shared/     拡張機能間で共有する TypeScript コード
 templates/extension/ 新しい拡張機能の雛形
 scripts/             共通ビルド・プロジェクト生成
 .vscode/             ルートからの検証・デバッグ設定
+tools/mock-chat/     Web AI Bridge の検証用 React チャット
 ```
 
 ## セットアップ
@@ -102,6 +103,9 @@ Marketplace 公開前には publisher、説明、repository、ライセンスを
 公開用の認証情報や自動公開の設定は含めていません。
 
 ## 参考
+
+実装済みの拡張機能: [Web AI Bridge（Phase 0）](extensions/web-ai-bridge/README.md)。
+方式検証の範囲・手順は [Issue #1 対応記録](docs/issue-1-phase-0.md) を参照してください。
 
 - [npm workspaces](https://docs.npmjs.com/cli/v11/using-npm/workspaces/)
 - [VS Code 拡張機能のバンドル](https://code.visualstudio.com/api/working-with-extensions/bundling-extension)
