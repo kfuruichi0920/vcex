@@ -1,0 +1,22 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "拡張機能をデバッグ（フォルダ名を指定）",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/extensions/${input:extensionName}"
+      ],
+      "outFiles": ["${workspaceFolder}/extensions/*/dist/**/*.js"],
+      "preLaunchTask": "build extensions"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "extensionName",
+      "type": "promptString",
+      "description": "extensions/ 配下のフォルダ名"
+    }
+  ]
+}

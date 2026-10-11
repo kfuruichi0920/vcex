@@ -1,0 +1,22 @@
+{
+  "name": "__NAME__",
+  "displayName": "__NAME__",
+  "description": "__NAME__ VS Code extension",
+  "version": "0.0.1",
+  "private": true,
+  "publisher": "local-dev",
+  "engines": { "vscode": "^1.100.0" },
+  "categories": ["Other"],
+  "main": "./dist/extension.js",
+  "scripts": {
+    "build": "node ../../scripts/build-extension.mjs",
+    "watch": "node ../../scripts/build-extension.mjs --watch",
+    "typecheck": "tsc -p tsconfig.json",
+    "vscode:prepublish": "npm run typecheck && node ../../scripts/build-extension.mjs --production",
+    "package": "vsce package --no-dependencies --allow-missing-repository --skip-license"
+  },
+  "dependencies": { "@vcex/shared": "0.0.0" },
+  "contributes": {
+    "commands": [{ "command": "__NAME__.hello", "title": "__NAME__: Hello" }]
+  }
+}

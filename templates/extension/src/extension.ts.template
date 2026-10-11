@@ -1,0 +1,10 @@
+import * as vscode from 'vscode';
+import { createGreeting } from '@vcex/shared';
+
+export function activate(context: vscode.ExtensionContext): void {
+  context.subscriptions.push(
+    vscode.commands.registerCommand('__NAME__.hello', () => {
+      void vscode.window.showInformationMessage(createGreeting('__NAME__'));
+    }),
+  );
+}
